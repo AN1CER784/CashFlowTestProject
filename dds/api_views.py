@@ -14,11 +14,7 @@ from .filters import OperationFilter
 class OperationStatusViewSet(viewsets.ModelViewSet):
     """
     CRUD по справочнику статусов.
-    GET /api/statuses/ — список (поиск: ?search=...)
-    POST /api/statuses/ — создание
-    GET /api/statuses/{id}/ — деталь
-    PATCH/PUT /api/statuses/{id}/ — обновление
-    DELETE /api/statuses/{id}/ — удаление
+    Поддерживает поиск по name (?search=...)
     """
     queryset = OperationStatus.objects.all()
     serializer_class = OperationStatusSerializer
