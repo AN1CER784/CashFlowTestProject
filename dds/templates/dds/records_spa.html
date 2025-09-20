@@ -1,0 +1,370 @@
+{% extends 'base.html' %}
+{% block content %}
+<h3 class="mb-3">Записи ДДС</h3>
+
+<form id="filters" class="row g-2 mb-3">
+  <div class="col-md-2"><label class="form-label">Дата с</label><input type="date" name="date_from" class="form-control"></div>
+  <div class="col-md-2"><label class="form-label">Дата по</label><input type="date" name="date_to" class="form-control"></div>
+  <div class="col-md-2"><label class="form-label">Статус</label><select name="status" class="form-select"></select></div>
+  <div class="col-md-2"><label class="form-label">Тип</label><select name="type" class="form-select"></select></div>
+  <div class="col-md-2"><label class="form-label">Категория</label><select name="category" class="form-select"></select></div>
+  <div class="col-md-2"><label class="form-label">Подкатегория</label><select name="subcategory" class="form-select"></select></div>
+  <div class="col-12">
+    <button class="btn btn-primary">Фильтр</button>
+    <button class="btn btn-secondary" type="button" id="resetFilters">Сброс</button>
+    <button class="btn btn-success float-end" type="button" id="btnNew">+ Новая запись</button>
+  </div>
+</form>
+
+<div class="table-responsive">
+<table class="table table-striped align-middle" id="recordsTable">
+  <thead>
+    <tr><th>Дата</th><th>Статус</th><th>Тип</th><th>Категория</th><th>Подкатегория</th><th class="text-end">Сумма</th><th>Комментарий</th><th></th></tr>
+  </thead><tbody></tbody>
+</table>
+</div>
+
+<nav><ul class="pagination" id="pager"></ul></nav>
+
+<div class="modal fade" id="recordModal" tabindex="-1">
+  <div class="modal-dialog modal-lg"><div class="modal-content">
+    <div class="modal-header">
+      <h5 class="modal-title" id="recordModalTitle">Новая запись</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+    </div>
+    <div class="modal-body">
+      <div class="alert alert-danger d-none" id="formErrors"></div>
+      <form id="recordForm" class="row g-2">
+        <input type="hidden" name="id">
+        <div class="col-md-3"><label class="form-label">Дата</label><input type="date" name="date" class="form-control"></div>
+        <div class="col-md-3"><label class="form-label">Статус</label><select name="status_id" class="form-select"></select></div>
+        <div class="col-md-3"><label class="form-label">Тип</label><select name="type_id" class="form-select"></select></div>
+        <div class="col-md-3"><label class="form-label">Категория</label><select name="category_id" class="form-select"></select></div>
+        <div class="col-md-3"><label class="form-label">Подкатегория</label><select name="subcategory_id" class="form-select"></select></div>
+        <div class="col-md-3"><label class="form-label">Сумма</label><input type="number" step="0.01" min="0.01" name="amount" class="form-control"></div>
+        <div class="col-12"><label class="form-label">Комментарий</label><textarea name="comment" class="form-control" rows="2"></textarea></div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+      <button class="btn btn-primary" id="btnSave">Сохранить</button>
+    </div>
+  </div></div>
+</div>
+
+<script>
+let state = { page: 1, filters: {} };
+let cache = { statuses: [], types: [], categoriesByType: new Map(), subcategoriesByCat: new Map() };
+let modal, modalEl;
+
+document.addEventListener('DOMContentLoaded', init);
+
+async function init(){
+  modalEl = document.getElementById('recordModal');
+  modal = new bootstrap.Modal(modalEl);
+  bindFilters();
+  bindModal();
+  await preloadDictionaries();
+  applyDefaultFilters();
+  await loadTable();
+}
+
+function bindFilters(){
+  const f = document.getElementById('filters');
+  const selStatus = f.elements['status'];
+  const selType = f.elements['type'];
+  const selCategory = f.elements['category'];
+  const selSubcat = f.elements['subcategory'];
+
+  f.addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    state.page = 1;
+    state.filters = getFilterValues();
+    await loadTable();
+  });
+  document.getElementById('resetFilters').addEventListener('click', async ()=>{
+    f.reset();
+    selCategory.innerHTML = '<option value="">(все)</option>';
+    selSubcat.innerHTML = '<option value="">(все)</option>';
+    state.page = 1; state.filters = {};
+    await loadTable();
+  });
+  document.getElementById('btnNew').addEventListener('click', ()=>openModal());
+
+  selType.addEventListener('change', async (e)=>{
+    await fillCategories(selCategory, e.target.value, true);
+    selSubcat.innerHTML = '<option value="">(все)</option>';
+  });
+  selCategory.addEventListener('change', async (e)=>{
+    await fillSubcategories(selSubcat, e.target.value, true);
+  });
+}
+
+function applyDefaultFilters(){
+  const f = document.getElementById('filters');
+  f.elements['date_from'].value = '';
+  f.elements['date_to'].value = '';
+  fillSelect(f.elements['status'], cache.statuses, true);
+  fillSelect(f.elements['type'], cache.types, true);
+  f.elements['category'].innerHTML = '<option value="">(все)</option>';
+  f.elements['subcategory'].innerHTML = '<option value="">(все)</option>';
+}
+
+function getFilterValues(){
+  const f = document.getElementById('filters');
+  const params = {};
+  for (const name of ['date_from','date_to','status','type','category','subcategory']){
+    const v = f.elements[name].value;
+    if (v) params[name] = v;
+  }
+  return params;
+}
+
+async function loadTable(page=null){
+  if (page) state.page = page;
+  const params = new URLSearchParams(Object.entries(state.filters));
+  params.set('page', state.page);
+  const data = await apiFetch(`/api/operations/?${params.toString()}`);
+  renderTable(data.results||[]);
+  renderPager(data);
+}
+
+function renderTable(rows){
+  const tb = document.querySelector('#recordsTable tbody');
+  tb.innerHTML = '';
+  for (const r of rows){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${r.date}</td>
+      <td>${r.status?.name||''}</td>
+      <td>${r.type?.name||''}</td>
+      <td>${r.category?.name||''}</td>
+      <td>${r.subcategory?.name||''}</td>
+      <td class="text-end">${fmtMoney(r.amount)}</td>
+      <td class="text-break">${r.comment||''}</td>
+      <td class="text-nowrap">
+        <button class="btn btn-sm btn-outline-primary me-1" data-action="edit" data-id="${r.id}">Изм.</button>
+        <button class="btn btn-sm btn-outline-danger" data-action="del" data-id="${r.id}">Удалить</button>
+      </td>`;
+    tb.appendChild(tr);
+  }
+  tb.querySelectorAll('button[data-action="edit"]').forEach(b=>b.addEventListener('click', ()=>openModal(b.dataset.id)));
+  tb.querySelectorAll('button[data-action="del"]').forEach(b=>b.addEventListener('click', ()=>delRecord(b.dataset.id)));
+}
+
+function renderPager(data){
+  const ul = document.getElementById('pager');
+  ul.innerHTML = '';
+  function pageFromUrl(u){
+    if (!u) return null;
+    const p = new URL(u, window.location.origin);
+    return p.searchParams.get('page');
+  }
+  const prev = pageFromUrl(data.previous);
+  const next = pageFromUrl(data.next);
+  if (prev){
+    const li = document.createElement('li'); li.className='page-item';
+    li.innerHTML = `<a class="page-link" href="#">Назад</a>`; li.onclick = (e)=>{e.preventDefault(); loadTable(prev);};
+    ul.appendChild(li);
+  }
+  const liInfo = document.createElement('li'); liInfo.className='page-item disabled';
+  const page = parseInt(state.page||1,10);
+  const totalPages = Math.ceil((data.count||0)/20)||1;
+  liInfo.innerHTML = `<span class="page-link">Стр. ${page} / ${totalPages}</span>`;
+  ul.appendChild(liInfo);
+  if (next){
+    const li = document.createElement('li'); li.className='page-item';
+    li.innerHTML = `<a class="page-link" href="#">Вперед</a>`; li.onclick = (e)=>{e.preventDefault(); loadTable(next.match(/page=(\d+)/)?.[1]||page+1);};
+    ul.appendChild(li);
+  }
+}
+
+async function openModal(id=null){
+  const form = document.getElementById('recordForm');
+  form.reset();
+  form.elements['id'].value = id||'';
+  document.getElementById('formErrors').classList.add('d-none');
+  document.getElementById('recordModalTitle').textContent = id ? 'Редактировать запись' : 'Новая запись';
+
+  fillSelect(form.elements['status_id'], cache.statuses);
+  fillSelect(form.elements['type_id'], cache.types);
+  form.elements['category_id'].innerHTML = '<option value="">---------</option>';
+  form.elements['subcategory_id'].innerHTML = '<option value="">---------</option>';
+
+  if (!id){
+    form.elements['date'].value = today();
+  } else {
+    const r = await apiFetch(`/api/operations/${id}/`);
+    form.elements['date'].value = r.date;
+    form.elements['status_id'].value = r.status?.id || r.status_id || '';
+    form.elements['type_id'].value = r.type?.id || r.type_id || '';
+    await fillCategories(form.elements['category_id'], form.elements['type_id'].value, false);
+    form.elements['category_id'].value = r.category?.id || r.category_id || '';
+    await fillSubcategories(form.elements['subcategory_id'], form.elements['category_id'].value, false);
+    form.elements['subcategory_id'].value = r.subcategory?.id || r.subcategory_id || '';
+    form.elements['amount'].value = r.amount;
+    form.elements['comment'].value = r.comment||'';
+  }
+  modal.show();
+}
+
+function bindModal(){
+  document.getElementById('btnSave').addEventListener('click', saveRecord);
+  const form = document.getElementById('recordForm');
+  form.elements['type_id'].addEventListener('change', async (e)=>{
+    await fillCategories(form.elements['category_id'], e.target.value, false);
+    form.elements['subcategory_id'].innerHTML = '<option value="">---------</option>';
+  });
+  form.elements['category_id'].addEventListener('change', async (e)=>{
+    await fillSubcategories(form.elements['subcategory_id'], e.target.value, false);
+  });
+}
+
+async function saveRecord(){
+  const form = document.getElementById('recordForm');
+  const btn = document.getElementById('btnSave');
+  const box = document.getElementById('formErrors');
+
+  // ---- helpers ----
+  function clearFieldErrors(){
+    box.classList.add('d-none'); box.innerHTML = '';
+    form.querySelectorAll('.is-invalid').forEach(el => el.classList.remove('is-invalid'));
+    form.querySelectorAll('.invalid-feedback[data-gen="1"]').forEach(el => el.remove());
+  }
+  function setFieldError(inputEl, msg){
+    if (!inputEl) return;
+    inputEl.classList.add('is-invalid');
+    const fb = document.createElement('div');
+    fb.className = 'invalid-feedback d-block';
+    fb.dataset.gen = '1';
+    fb.textContent = msg;
+    // place message after input/select/textarea
+    if (inputEl.parentElement) inputEl.parentElement.appendChild(fb);
+  }
+  function showErrorsList(messages){
+    box.classList.remove('d-none');
+    box.innerHTML = '<b>Ошибки:</b><br>' + messages.map(m => Array.isArray(m) ? m.join(', ') : m).join('<br>');
+  }
+
+  clearFieldErrors();
+
+  // ---- collect values ----
+  const id = form.elements['id'].value || null;
+  const payload = {
+    date: (form.elements['date'].value || '').trim(),
+    status_id: (form.elements['status_id'].value || '').trim(),
+    type_id: (form.elements['type_id'].value || '').trim(),
+    category_id: (form.elements['category_id'].value || '').trim(),
+    subcategory_id: (form.elements['subcategory_id'].value || '').trim(),
+    amount: (form.elements['amount'].value || '').trim(),
+    comment: (form.elements['comment'].value || '').trim()
+  };
+
+  // ---- client-side validation ----
+  const clientErrors = [];
+
+  if (!payload.date) {
+    clientErrors.push('date: Обязательное поле');
+    setFieldError(form.elements['date'], 'Укажите дату');
+  } else if (!/^\d{4}-\d{2}-\d{2}$/.test(payload.date)) {
+    clientErrors.push('date: Неверный формат (YYYY-MM-DD)');
+    setFieldError(form.elements['date'], 'Формат YYYY-MM-DD');
+  }
+
+  if (!payload.status_id) { clientErrors.push('Статус: Обязательное поле'); setFieldError(form.elements['status_id'], 'Выберите статус'); }
+  if (!payload.type_id) { clientErrors.push('Тип: Обязательное поле'); setFieldError(form.elements['type_id'], 'Выберите тип'); }
+  if (!payload.category_id) { clientErrors.push('Категорий: Обязательное поле'); setFieldError(form.elements['category_id'], 'Выберите категорию'); }
+  if (!payload.subcategory_id) { clientErrors.push('Подкатегория: Обязательное поле'); setFieldError(form.elements['subcategory_id'], 'Выберите подкатегорию'); }
+
+  const amountNum = parseFloat(payload.amount.replace(',', '.'));
+  if (!payload.amount) {
+    clientErrors.push('amount: Обязательное поле');
+    setFieldError(form.elements['amount'], 'Укажите сумму');
+  } else if (isNaN(amountNum)) {
+    clientErrors.push('amount: Должно быть числом');
+    setFieldError(form.elements['amount'], 'Введите число');
+  } else if (amountNum <= 0) {
+    clientErrors.push('amount: Должно быть больше 0');
+    setFieldError(form.elements['amount'], 'Сумма > 0');
+  } else {
+    // normalize to 2 decimals for server
+    payload.amount = amountNum.toFixed(2);
+  }
+
+  if (clientErrors.length) {
+    showErrorsList(clientErrors);
+    return;
+  }
+
+  // ---- submit to API (server-side validation) ----
+  try{
+    btn.disabled = true; const prevText = btn.textContent; btn.textContent = 'Сохранение…';
+    if (!id){
+      await apiFetch('/api/operations/', { method:'POST', body: payload });
+    } else {
+      await apiFetch(`/api/operations/${id}/`, { method:'PATCH', body: payload });
+    }
+    modal.hide();
+    await loadTable();
+  }catch(e){
+    // map server errors to fields when possible
+    const fieldMap = { date:'date', status:'status_id', status_id:'status_id', type:'type_id', type_id:'type_id',
+                       category:'category_id', category_id:'category_id', subcategory:'subcategory_id', subcategory_id:'subcategory_id',
+                       amount:'amount', comment:'comment', non_field_errors:null };
+    const msgs = [];
+    if (e.data && typeof e.data === 'object'){
+      for (const [k,v] of Object.entries(e.data)){
+        const msgArr = Array.isArray(v) ? v : [String(v)];
+        msgs.push(`${k}: ${msgArr.join(', ')}`);
+        const fieldName = fieldMap[k];
+        if (fieldName && form.elements[fieldName]) {
+          setFieldError(form.elements[fieldName], msgArr.join(', '));
+        }
+      }
+    } else {
+      msgs.push('Не удалось сохранить.');
+    }
+    showErrorsList(msgs);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Сохранить';
+  }
+}
+
+
+async function delRecord(id){
+  if (!confirm('Удалить запись?')) return;
+  try{
+    await apiFetch(`/api/operations/${id}/`, { method:'DELETE' });
+    await loadTable();
+  }catch(e){
+    alert('Не удалось удалить: ' + (e.data?.detail||e.status||''));
+  }
+}
+
+async function preloadDictionaries(){
+  cache.statuses = (await apiFetch('/api/statuses/?page_size=1000')).results || (await apiFetch('/api/statuses/'));
+  cache.types = (await apiFetch('/api/types/?page_size=1000')).results || (await apiFetch('/api/types/'));
+}
+
+function fillSelect(sel, items, includeAll=false){
+  sel.innerHTML = includeAll ? '<option value="">(все)</option>' : '<option value="">---------</option>';
+  for (const it of items){ sel.insertAdjacentHTML('beforeend', `<option value="${it.id}">${it.name}</option>`); }
+}
+
+async function fillCategories(sel, typeId, includeAll=false){
+  if (!typeId){ sel.innerHTML = includeAll ? '<option value="">(все)</option>':'<option value="">---------</option>'; return; }
+  const d = await apiFetch(`/api/categories/?type=${typeId}&page_size=1000`);
+  const list = d.results || d;
+  sel.innerHTML = includeAll ? '<option value="">(все)</option>' : '<option value="">---------</option>';
+  for (const it of list){ sel.insertAdjacentHTML('beforeend', `<option value="${it.id}">${it.name}</option>`); }
+}
+
+async function fillSubcategories(sel, categoryId, includeAll=false){
+  if (!categoryId){ sel.innerHTML = includeAll ? '<option value="">(все)</option>':'<option value="">---------</option>'; return; }
+  const d = await apiFetch(`/api/subcategories/?category=${categoryId}&page_size=1000`);
+  const list = d.results || d;
+  sel.innerHTML = includeAll ? '<option value="">(все)</option>' : '<option value="">---------</option>';
+  for (const it of list){ sel.insertAdjacentHTML('beforeend', `<option value="${it.id}">${it.name}</option>`); }
+}
+</script>
+{% endblock %}

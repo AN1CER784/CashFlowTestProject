@@ -1,0 +1,146 @@
+{% extends 'base.html' %}
+{% block content %}
+<h3 class="mb-3">Справочники</h3>
+<div class="row">
+  <div class="col-md-6 col-12"><h5>Статусы</h5>
+    <div class="mb-2 d-flex">
+      <input class="form-control me-2" id="newStatusName" placeholder="Новый статус">
+      <button class="btn btn-success" id="addStatus">Добавить</button>
+    </div>
+    <ul class="list-group" id="statusList"></ul>
+  </div>
+
+  <div class="col-md-6 col-12"><h5>Типы</h5>
+    <div class="mb-2 d-flex">
+      <input class="form-control me-2" id="newTypeName" placeholder="Новый тип">
+      <button class="btn btn-success" id="addType">Добавить</button>
+    </div>
+    <ul class="list-group" id="typeList"></ul>
+  </div>
+
+  <div class="col-md-6 col-12"><h5>Категории</h5>
+    <div class="mb-2">
+      <div class="input-group">
+        <input class="form-control" id="newCatName" placeholder="Имя категории">
+        <select class="form-select" id="newCatType"></select>
+        <button class="btn btn-success" id="addCategory">Добавить</button>
+      </div>
+    </div>
+    <ul class="list-group" id="catList"></ul>
+  </div>
+
+  <div class="col-md-6 col-12"><h5>Подкатегории</h5>
+    <div class="mb-2">
+      <div class="input-group">
+        <input class="form-control" id="newSubcatName" placeholder="Имя подкатегории">
+        <select class="form-select" id="newSubcatCat"></select>
+        <button class="btn btn-success" id="addSubcategory">Добавить</button>
+      </div>
+    </div>
+    <ul class="list-group" id="subcatList"></ul>
+  </div>
+</div>
+
+<script>
+let dataCache = { statuses:[], types:[], categories:[], subcategories:[] };
+
+document.addEventListener('DOMContentLoaded', init);
+async function init(){
+  await refreshAll();
+  document.getElementById('addStatus').onclick = async ()=>{
+    const name = document.getElementById('newStatusName').value.trim(); if(!name) return;
+    await apiFetch('/api/statuses/', {method:'POST', body:{name}});
+    document.getElementById('newStatusName').value=''; await refreshStatuses();
+  };
+  document.getElementById('addType').onclick = async ()=>{
+    const name = document.getElementById('newTypeName').value.trim(); if(!name) return;
+    await apiFetch('/api/types/', {method:'POST', body:{name}});
+    document.getElementById('newTypeName').value=''; await refreshTypes(); await refreshCategories(); await refreshSubcategories();
+  };
+  document.getElementById('addCategory').onclick = async ()=>{
+    const name = document.getElementById('newCatName').value.trim();
+    const type_id = document.getElementById('newCatType').value;
+    if(!name || !type_id) return;
+    await apiFetch('/api/categories/', {method:'POST', body:{name, type_id}});
+    document.getElementById('newCatName').value=''; await refreshCategories(); await refreshSubcategories();
+  };
+  document.getElementById('addSubcategory').onclick = async ()=>{
+    const name = document.getElementById('newSubcatName').value.trim();
+    const category_id = document.getElementById('newSubcatCat').value;
+    if(!name || !category_id) return;
+    await apiFetch('/api/subcategories/', {method:'POST', body:{name, category_id}});
+    document.getElementById('newSubcatName').value=''; await refreshSubcategories();
+  };
+}
+
+async function refreshAll(){ await refreshStatuses(); await refreshTypes(); await refreshCategories(); await refreshSubcategories(); }
+
+async function refreshStatuses(){
+  dataCache.statuses = (await apiFetch('/api/statuses/?page_size=1000')).results || (await apiFetch('/api/statuses/'));
+  renderList('statusList', dataCache.statuses, 'statuses');
+}
+
+async function refreshTypes(){
+  dataCache.types = (await apiFetch('/api/types/?page_size=1000')).results || (await apiFetch('/api/types/'));
+  renderList('typeList', dataCache.types, 'types');
+  fillSelect(document.getElementById('newCatType'), dataCache.types);
+}
+
+async function refreshCategories(){
+  const d = await apiFetch('/api/categories/?page_size=1000');
+  dataCache.categories = d.results || d;
+  renderList('catList', dataCache.categories, 'categories');
+  fillSelect(document.getElementById('newSubcatCat'), dataCache.categories);
+}
+
+async function refreshSubcategories(){
+  const d = await apiFetch('/api/subcategories/?page_size=1000');
+  dataCache.subcategories = d.results || d;
+  renderList('subcatList', dataCache.subcategories, 'subcategories');
+}
+
+function renderList(elId, items, type){
+  const ul = document.getElementById(elId);
+  ul.innerHTML = '';
+  for (const it of items){
+    const li = document.createElement('li'); li.className='list-group-item d-flex justify-content-between align-items-center';
+    const right = document.createElement('div');
+    right.innerHTML = `
+      <button class="btn btn-sm btn-outline-primary me-0" data-action="edit" data-id="${it.id}">Изм.</button>
+      <button class="btn btn-sm btn-outline-danger " data-action="del" data-id="${it.id}">Удалить</button>`;
+    const text = document.createElement('div');
+    if (type==='categories'){
+      text.textContent = `${it.name} (${it.type?.name || ''})`;
+    } else if (type==='subcategories'){
+      const cat = dataCache.categories.find(x=>x.id=== (it.category?.id || it.category_id));
+      const catName = cat ? cat.name : '';
+      text.textContent = `${it.name} (${catName})`;
+    } else {
+      text.textContent = it.name;
+    }
+    li.appendChild(text); li.appendChild(right);
+    ul.appendChild(li);
+  }
+  ul.querySelectorAll('button[data-action="del"]').forEach(b=>b.onclick = ()=>delItem(type, b.dataset.id));
+  ul.querySelectorAll('button[data-action="edit"]').forEach(b=>b.onclick = ()=>renameItem(type, b.dataset.id));
+}
+
+async function delItem(type, id){
+  if (!confirm('Удалить?')) return;
+  await apiFetch(`/api/${type}/${id}/`, {method:'DELETE'});
+  await refreshAll();
+}
+
+async function renameItem(type, id){
+  const name = prompt('Новое имя:');
+  if (!name) return;
+  await apiFetch(`/api/${type}/${id}/`, {method:'PATCH', body:{name}});
+  await refreshAll();
+}
+
+function fillSelect(sel, items){
+  sel.innerHTML = '<option value="">---------</option>';
+  for (const it of items){ sel.insertAdjacentHTML('beforeend', `<option value="${it.id}">${it.name}</option>`); }
+}
+</script>
+{% endblock %}

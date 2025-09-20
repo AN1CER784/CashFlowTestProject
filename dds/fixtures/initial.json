@@ -1,0 +1,16 @@
+[
+  {"model":"dds.operationstatus","pk":1,"fields":{"name":"Бизнес"}},
+  {"model":"dds.operationstatus","pk":2,"fields":{"name":"Личное"}},
+  {"model":"dds.operationstatus","pk":3,"fields":{"name":"Налог"}},
+
+  {"model":"dds.operationtype","pk":1,"fields":{"name":"Пополнение"}},
+  {"model":"dds.operationtype","pk":2,"fields":{"name":"Списание"}},
+
+  {"model":"dds.category","pk":1,"fields":{"name":"Инфраструктура","type":1}},
+  {"model":"dds.subcategory","pk":1,"fields":{"name":"VPS","category":1}},
+  {"model":"dds.subcategory","pk":2,"fields":{"name":"Proxy","category":1}},
+
+  {"model":"dds.category","pk":2,"fields":{"name":"Маркетинг","type":2}},
+  {"model":"dds.subcategory","pk":3,"fields":{"name":"Farpost","category":2}},
+  {"model":"dds.subcategory","pk":4,"fields":{"name":"Avito","category":2}}
+]
