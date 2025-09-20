@@ -50,3 +50,16 @@ docker container exec -it cashflowtestproject-web-1 python manage.py createsuper
 * UI: [http://localhost:8000/](http://localhost:8000/)
 * Админка: [http://localhost:8000/admin/](http://localhost:8000/admin/)
 
+## Интерфейс
+* Главная страница с записями
+
+![main.png](readme_images/main.png)
+---
+* Форма для добавления записи
+
+![add_note.png](readme_images/add_note.png)
+
+---
+* Страница со справочниками
+
+![books.png](readme_images/books.png)
