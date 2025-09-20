@@ -34,14 +34,18 @@ POSTGRES_PASSWORD=
 docker compose up --build
 ```
 
-
-4. Создать суперпользователя (для входа в админку):
-
+4. (Опционально) Применить фикстуры с тестовыми данными 
 ```bash
-docker compose run --rm web python manage.py createsuperuser
+docker container exec -it cashflowtestproject-web-1 python manage.py loaddata dds/fixtures/initial.json
 ```
 
-5. Открыть приложение:
+5. Создать суперпользователя (для входа в админку):
+
+```bash
+docker container exec -it cashflowtestproject-web-1 python manage.py createsuperuser
+```
+
+6. Открыть приложение:
 
 * UI: [http://localhost:8000/](http://localhost:8000/)
 * Админка: [http://localhost:8000/admin/](http://localhost:8000/admin/)
